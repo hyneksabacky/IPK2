@@ -3,27 +3,44 @@
 
 const struct option longopts[] =
 {
-    {"icmp",   no_argument,        0, 'v'},
-    {"arp",      no_argument,        0, 'h'},
+    {"icmp",        no_argument,    0,   'x'},
+    {"arp",         no_argument,    0,   'y'},
+    {"tcp",         no_argument,    0,   't'},
+    {"udp",         no_argument,    0,   'u'},
+    {"interface",   optional_argument,    0,   'i'},
     {0,0,0,0},
 };
+
+void arg_error_msg(){
+    fprintf(stderr,
+    "\nusuage is: \n\n" 
+    "./ipk-sniffer [-i rozhraní | --interface rozhraní] {-p ­­port} {[--tcp|-t] [--udp|-u] [--arp] [--icmp] } {-n num}\n"
+    "\n"
+    "interface|i : <value> - for selecting interface\n" 
+    "          p : <value> - number of port (if not specified, all ports) \n" 
+    "      tcp|t : tcp packets only \n"
+    "      udp|u : udp packets only \n"
+    "        arp : only ARP frames \n"
+    "       icmp : only ICMPv4 and ICMPv6 packets \n"
+    "          n : <value> - number of packets to be shown  \n"
+    );
+}
 
 using namespace std;
 int main(int argc, char **argv)
 {
     
-    
-    
-    int opt,a,b,c, d, e;
-    while ((opt = getopt_long(argc,argv,"ip:tun:", longopts)) != EOF)
+    int opt,a,b,c, d, e, index;
+    while ((opt = getopt_long(argc,argv,"i:p:tun:", longopts, &index)) != EOF)
         switch(opt)
         {
-            case 'i': a = 1; cout <<" i is enabled"<<a <<endl; break;
-            case 'p': b = 1; cout << "value of p is"<< optarg <<endl ; break;
+            case 'i': a = 1; cout <<"value of i is "<< optarg <<endl ; break;
+            case 'p': b = 1; cout << "value of p is "<< optarg <<endl ; break;
             case 't': c = 1; cout <<" t is enabled"<<c <<endl; break;
             case 'u': d = 1; cout <<" u is enabled"<<d <<endl; break;
-            case 'n': e = 1; cout << "value of n is"<< optarg <<endl ; break;
-            case '?': fprintf(stderr, "usuage is \n -a : for enabling a \n -b : for enabling b \n -c: <value> ");
+            case 'n': e = 1; cout << "value of n is "<< optarg <<endl ; break;
+            case 'x': e = 1; cout << "icmp is enabled"<<endl ; break;
+            case '?': arg_error_msg();
             default: cout<<endl; exit(1);
         }
 
