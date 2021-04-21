@@ -1,6 +1,7 @@
 //https://www.tcpdump.org/pcap.html
 //http://yuba.stanford.edu/~casado/pcap/section3.html
 //https://www.geeksforgeeks.org/c-program-display-hostname-ip-address/
+//https://github.com/lsanotes/libpcap-tutorial/blob/master/arpsniffer.c
 
 #include <iostream>
 #include <getopt.h>
@@ -26,7 +27,7 @@ struct sniff_ethernet {
 };
 
 	/* IP header */
-struct sniff_ip {
+struct sniff_ipv4 {
         u_char ip_vhl;		/* version << 4 | header length >> 2 */
         u_char ip_tos;		/* type of service */
         u_short ip_len;		/* total length */
@@ -43,6 +44,15 @@ struct sniff_ip {
 };
 #define IP_HL(ip)		(((ip)->ip_vhl) & 0x0f)
 #define IP_V(ip)		(((ip)->ip_vhl) >> 4)
+
+struct sniff_ipv6{
+    __int32_t prefix;
+    u_int16_t payload_len;
+    u_int8_t next_header;
+    u_int8_t hop_limit;
+    in6_addr source;
+    in6_addr destination;
+};
 
 	/* TCP header */
 	typedef u_int tcp_seq;
@@ -69,18 +79,25 @@ struct sniff_ip {
         u_short th_urp;		/* urgent pointer */
 };
 
+struct sniff_udp {
+    u_int16_t sport;
+    u_int16_t dport;
+    u_int16_t len;
+    u_int16_t checksum;
+    u_int32_t data;
+};
+
 class Restrictions {
     public:
         char* device = NULL;
-        int numof_packets = -1;
-        std::string filter_exp = "port ";
+        int numof_packets = 1;
+        std::string filter_exp = "";
         std::map<std::string, bool> possible_packets {
             {"ALL", true},
             {"TCP", false},
             {"UDP", false},
             {"ICMP", false},
-            {"ARP", false},
-            {"OTHER", false}
+            {"ARP", false}
         };
 
         void set_possible_packets(std::string packet){
@@ -93,7 +110,11 @@ class Restrictions {
             possible_packets["UDP"] = true;
             possible_packets["ICMP"] = true;
             possible_packets["ARP"] = true;
-            possible_packets["OTHER"] = true;
+        }
+
+        void set_filter_exp(std::string port_num){
+            filter_exp = "port ";
+            filter_exp = filter_exp.append(port_num);
         }
 } restr;
 
@@ -154,39 +175,111 @@ void print_packet(const u_char* packet, int packet_len){
     cout << endl;
 }
 
+void print_mac_address(const u_char* addr){
+    using namespace std;
+    cout << setw(2) << setfill('0') << hex << (int)addr[0] << ":";
+    cout << setw(2) << setfill('0') << hex << (int)addr[1] << ":";
+    cout << setw(2) << setfill('0') << hex << (int)addr[2] << ":";
+    cout << setw(2) << setfill('0') << hex << (int)addr[3] << ":";
+    cout << setw(2) << setfill('0') << hex << (int)addr[4] << ":";
+    cout << setw(2) << setfill('0') << hex << (int)addr[5]; 
+}
+
+void arp_packet(const struct sniff_ethernet *ethernet, const struct pcap_pkthdr* pkthdr,const u_char* packet){
+    print_time(pkthdr->ts);
+    using namespace std;
+    print_mac_address(ethernet->ether_shost);
+    cout << " > ";
+    print_mac_address(ethernet->ether_dhost);
+    cout << ", ";
+    printf("length %d bytes\n", pkthdr->caplen);
+
+    print_packet(packet, pkthdr->caplen);
+}
+
+std::string ready_port_output(int port){
+    std::string appendee = " : ";
+    return appendee.append(std::to_string(port));
+}
+
 void ipv4_packet(const struct pcap_pkthdr* pkthdr,const u_char* packet){
 #define SIZE_ETHERNET 14
-	const struct sniff_ip *ip; /* The IP header */
+	const struct sniff_ipv4 *ip; /* The IP header */
 	const struct sniff_tcp *tcp; /* The TCP header */
 	const char *payload; /* Packet payload */
 
 	u_int size_ip;
 	u_int size_tcp;
 
-	ip = (struct sniff_ip*)(packet + SIZE_ETHERNET);
+    std::string sport= "";
+    std::string dport= "";
+
+	ip = (struct sniff_ipv4*)(packet + SIZE_ETHERNET);
 	size_ip = IP_HL(ip)*4;
-	if (size_ip < 20) {
-		printf("   * Invalid IP header length: %u bytes\n", size_ip);
-		return;
-	}
-	tcp = (struct sniff_tcp*)(packet + SIZE_ETHERNET + size_ip);
-	size_tcp = TH_OFF(tcp)*4;
-	if (size_tcp < 20) {
-		printf("   * Invalid TCP header length: %u bytes\n", size_tcp);
-		return;
-	}
+
+    if(ip->ip_p == '\x11' && restr.possible_packets["UDP"]){
+        const struct sniff_udp *udp;
+
+        udp = (struct sniff_udp*)(packet+SIZE_ETHERNET+size_ip);
+        sport = ready_port_output(ntohs(udp->sport));
+        dport = ready_port_output(ntohs(udp->dport));
+    } else if (ip->ip_p == '\x06' && restr.possible_packets["TCP"]){
+        tcp = (struct sniff_tcp*)(packet + SIZE_ETHERNET + size_ip);
+        size_tcp = TH_OFF(tcp)*4;
+        sport = ready_port_output(ntohs(tcp->th_sport));
+        dport = ready_port_output(ntohs(tcp->th_dport));  
+    } else if (ip->ip_p == '\x01' && restr.possible_packets["ICMP"]){
+    } else{
+        if(!restr.possible_packets["ALL"])
+            return;
+    }
 
     print_time(pkthdr->ts);
-    
-    printf("%s : %d ", inet_ntoa(ip->ip_src), tcp->th_sport);
-    printf("> %s : %d, ", inet_ntoa(ip->ip_dst), tcp->th_dport);
+    printf("%s%s ", inet_ntoa(ip->ip_src), sport.c_str());
+    printf("> %s%s, ", inet_ntoa(ip->ip_dst), dport.c_str());
     printf("length %d bytes\n", pkthdr->caplen);
 
-    print_packet(packet, pkthdr->caplen);
-    
+    print_packet(packet, pkthdr->caplen);  
 }
 
-void my_callback(u_char *useless,const struct pcap_pkthdr* pkthdr,const u_char* packet)
+void ipv6_packet(const struct pcap_pkthdr* pkthdr,const u_char* packet){
+#define SIZE_IPv6 40
+
+    const struct sniff_ipv6 *ip; /* The IP header */
+	const struct sniff_tcp *tcp; /* The TCP header */
+	const char *payload; /* Packet payload */
+
+    std::string sport= "";
+    std::string dport= "";
+
+    ip = (struct sniff_ipv6*)(packet + SIZE_ETHERNET);
+
+    if(ip->next_header == '\x11' && restr.possible_packets["UDP"]){
+        const struct sniff_udp *udp;
+
+        udp = (struct sniff_udp*)(packet+SIZE_ETHERNET+SIZE_IPv6);
+        sport = ready_port_output(ntohs(udp->sport));
+        dport = ready_port_output(ntohs(udp->dport));
+    } else if (ip->next_header == '\x06' && restr.possible_packets["TCP"]){
+        tcp = (struct sniff_tcp*)(packet + SIZE_ETHERNET + SIZE_IPv6);
+        sport = ready_port_output(ntohs(tcp->th_sport));
+        dport = ready_port_output(ntohs(tcp->th_dport));  
+    } else if (ip->next_header == '\x01' && restr.possible_packets["ICMP"]){
+    } else{
+        if(!restr.possible_packets["ALL"])
+            return;
+    }
+
+    char buf6[INET6_ADDRSTRLEN];
+    print_time(pkthdr->ts);
+    printf("%s%s ", inet_ntop(AF_INET6, &ip->source,buf6, sizeof(buf6)), sport.c_str());
+    printf("> %s%s, ", inet_ntop(AF_INET6, &ip->destination,buf6, sizeof(buf6)), dport.c_str());
+    printf("length %d bytes\n", pkthdr->caplen);
+
+    print_packet(packet, pkthdr->caplen); 
+}
+
+void get_ethernet(u_char *useless,const struct pcap_pkthdr* pkthdr,const u_char* packet)
 {
     /* ethernet headers are always exactly 14 bytes */
 #define SIZE_ETHERNET 14
@@ -194,17 +287,25 @@ void my_callback(u_char *useless,const struct pcap_pkthdr* pkthdr,const u_char* 
 	const struct sniff_ethernet *ethernet; /* The ethernet header */
 
 	ethernet = (struct sniff_ethernet*)(packet);
-
-    //std::cout<<ethernet->ether_type<<std::endl;
+    
     if(htons(ethernet->ether_type) == 0x0800){
-        if(restr.possible_packets["ICMP"])
+        if(restr.possible_packets["ICMP"] || restr.possible_packets["TCP"] || restr.possible_packets["UDP"])
             ipv4_packet(pkthdr, packet);
-    } else if(htons(ethernet->ether_type) == 0x0806){
+    } else if(htons(ethernet->ether_type) == 0x86dd){
+        if(restr.possible_packets["ICMP"] || restr.possible_packets["TCP"] || restr.possible_packets["UDP"])
+            ipv6_packet(pkthdr, packet);
+    }else if(htons(ethernet->ether_type) == 0x0806){
         if(restr.possible_packets["ARP"]){
-            std::cout << std::endl <<"----------------------------------" <<std::endl;
-            std::cout << "0x" << std::setw(4) << std::setfill('0') << std::hex <<htons(ethernet->ether_type) <<  std::endl ;
-            std::cout <<"----------------------------------" << std::endl << std::endl;
+            arp_packet(ethernet, pkthdr, packet);
         }
+    } else if(restr.possible_packets["ALL"]){
+        print_mac_address(ethernet->ether_shost);
+        std::cout << " > ";
+        print_mac_address(ethernet->ether_dhost);
+        std::cout << ", ";
+        printf("length %d bytes\n", pkthdr->caplen);
+
+        print_packet(packet, pkthdr->caplen);
     }
 
 }
@@ -264,18 +365,8 @@ void CLI_arg_usage(){
     exit(1);
 }
 
-using namespace std;
-int main(int argc, char **argv)
-{
-    pcap_t *handle;		            /* Session handle */
-    char errbuf[PCAP_ERRBUF_SIZE];	/* Error string */
-    struct bpf_program fp;		    /* The compiled filter expression */
-    bpf_u_int32 mask;		        /* The netmask of our sniffing device */
-    bpf_u_int32 net;		        /* The IP of our sniffing device */
-    struct pcap_pkthdr header;	    /* The header that pcap gives us */
-    const u_char *packet;		    /* The actual packet */
-    
-    int opt,a,b,c, d, e, index;
+void get_restrictions(int argc, char **argv){
+    int opt,index;
     opterr = 0;
     while ((opt = getopt_long(argc,argv,"i:p:tun:h", longopts, &index)) != EOF)
     {
@@ -290,7 +381,7 @@ int main(int argc, char **argv)
                             restr.device = optarg;
                         }
                         break;
-            case 'p': restr.filter_exp = restr.filter_exp.append(optarg); break;
+            case 'p': restr.set_filter_exp(optarg); break;
             case 't': restr.set_possible_packets("TCP"); break;
             case 'u': restr.set_possible_packets("UDP"); break;
             case 'n': restr.numof_packets = atoi(optarg); break;
@@ -304,6 +395,21 @@ int main(int argc, char **argv)
     }
     if(restr.possible_packets["ALL"])
         restr.set_all_possible_packets();
+}
+
+using namespace std;
+int main(int argc, char **argv)
+{
+    pcap_t *handle;		            /* Session handle */
+    char errbuf[PCAP_ERRBUF_SIZE];	/* Error string */
+    struct bpf_program fp;		    /* The compiled filter expression */
+    bpf_u_int32 mask;		        /* The netmask of our sniffing device */
+    bpf_u_int32 net;		        /* The IP of our sniffing device */
+    struct pcap_pkthdr header;	    /* The header that pcap gives us */
+    const u_char *packet;		    /* The actual packet */
+    
+    get_restrictions(argc, argv);
+    
     restr.device = interface_option(restr.device);
     if (restr.device == NULL) {
         fprintf(stderr, "Couldn't find default device: %s\n", errbuf);
@@ -329,7 +435,6 @@ int main(int argc, char **argv)
 		return(2);
 	}
 
-
     if (pcap_compile(handle, &fp, restr.filter_exp.c_str(), 0, net) == -1) {
         fprintf(stderr, "Couldn't parse filter %s: %s\n", restr.filter_exp.c_str(), pcap_geterr(handle));
         return(2);
@@ -339,7 +444,7 @@ int main(int argc, char **argv)
         return(2);
     }
 
-    pcap_loop(handle, (int)restr.numof_packets, my_callback, NULL);
+    pcap_loop(handle, (int)restr.numof_packets, get_ethernet, NULL);
 
     return 0;
 }
