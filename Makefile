@@ -1,5 +1,5 @@
 CC = g++
-CFLAGS  = -g -Werror
+CFLAGS  = -g -std=c++17 -Werror
 TARGET  = ipk-sniffer
 
 .PHONY: rebuild
