@@ -7,8 +7,6 @@
 #include <math.h>
 #include <arpa/inet.h>
 #include <iomanip>
-#include <map>
-#include <boost/algorithm/string.hpp>
 
 // Copyright 2002 Tim Carstens. All rights reserved. --------------
 
