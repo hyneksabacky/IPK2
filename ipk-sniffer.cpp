@@ -147,7 +147,7 @@ void print_packet(const u_char* packet, int packet_len){
     using namespace std;
     cout<< endl;
     for(int i = 0; i< ((packet_len+16-1)/16); i++){                                     // rounding up division
-        cout << "0x" << setw(4) << setfill('0') << hex << i*16 << ":  ";                // hex number of bytes   
+        cout << "0x" << setw(4) << setfill('0') << hex << i*16 << ":  ";                // hex number offset   
         for( int j = 0; j<16; j++){
             if(j == 8){
                 cout << " ";
@@ -369,11 +369,11 @@ void set_restrictions(int argc, char **argv){
                         }
                         break;
             case 'p': restr.set_port(optarg); break;
-            case 't': restr.set_possible_packets("TCP"); break;
-            case 'u': restr.set_possible_packets("UDP"); break;
+            case 't': restr.set_possible_packets("tcp"); break;
+            case 'u': restr.set_possible_packets("udp"); break;
             case 'n': restr.numof_packets = atoi(optarg); break;
-            case 'x': restr.set_possible_packets("ICMP"); break;
-            case 'y': restr.set_possible_packets("ARP"); break;
+            case 'x': restr.set_possible_packets("icmp"); break;
+            case 'y': restr.set_possible_packets("arp"); break;
             case '?':   if(optopt == 'i'){
                             continue;
                         }
