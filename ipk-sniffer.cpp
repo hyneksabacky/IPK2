@@ -1,11 +1,5 @@
-//https://www.tcpdump.org/pcap.html
-//http://yuba.stanford.edu/~casado/pcap/section3.html
-//https://www.geeksforgeeks.org/c-program-display-hostname-ip-address/
-//https://github.com/lsanotes/libpcap-tutorial/blob/master/arpsniffer.c
-
 #include <iostream>
 #include <getopt.h>
-#include <cstring>
 #include <pcap.h>
 #include <netinet/in.h>
 #include <string>
@@ -14,7 +8,7 @@
 #include <arpa/inet.h>
 #include <iomanip>
 #include <map>
-#include <string_view>
+#include <boost/algorithm/string.hpp>
 
 /* Ethernet addresses are 6 bytes */
 #define ETHER_ADDR_LEN	6
@@ -91,7 +85,9 @@ class Restrictions {
     public:
         char* device = NULL;
         int numof_packets = 1;
+        int port = -1;
         std::string filter_exp = "";
+        bool print_or = false;
         std::map<std::string, bool> possible_packets {
             {"ALL", true},
             {"TCP", false},
@@ -112,9 +108,30 @@ class Restrictions {
             possible_packets["ARP"] = true;
         }
 
-        void set_filter_exp(std::string port_num){
+        void set_port(std::string port_num){
             filter_exp = "port ";
             filter_exp = filter_exp.append(port_num);
+        }
+
+        void build_filter(){
+            if(possible_packets["TCP"])
+                append_to_filter("tcp");
+            if(possible_packets["UDP"])
+                append_to_filter("udp");
+            if(possible_packets["ICMP"])
+                append_to_filter("icmp");
+            if(possible_packets["ARP"])
+                append_to_filter("arp");     
+        }
+
+        void append_to_filter(std::string protocol){
+            if(!print_or && filter_exp!=""){
+                filter_exp = filter_exp.append(" && ");
+            } else if(print_or){
+                filter_exp = filter_exp.append(" || ");
+            }
+            filter_exp = filter_exp.append(protocol);
+            print_or = true;
         }
 } restr;
 
@@ -347,7 +364,6 @@ const struct option longopts[] =
     {0,0,0,0},
 };
 
-
 void CLI_arg_usage(){
     fprintf(stderr,
     "\nusuage is: \n\n" 
@@ -365,7 +381,8 @@ void CLI_arg_usage(){
     exit(1);
 }
 
-void get_restrictions(int argc, char **argv){
+//  Parsing Command Line arguments and setting restr options.
+void set_restrictions(int argc, char **argv){
     int opt,index;
     opterr = 0;
     while ((opt = getopt_long(argc,argv,"i:p:tun:h", longopts, &index)) != EOF)
@@ -381,7 +398,7 @@ void get_restrictions(int argc, char **argv){
                             restr.device = optarg;
                         }
                         break;
-            case 'p': restr.set_filter_exp(optarg); break;
+            case 'p': restr.set_port(optarg); break;
             case 't': restr.set_possible_packets("TCP"); break;
             case 'u': restr.set_possible_packets("UDP"); break;
             case 'n': restr.numof_packets = atoi(optarg); break;
@@ -390,11 +407,14 @@ void get_restrictions(int argc, char **argv){
             case '?':   if(optopt == 'i'){
                             continue;
                         }
-            default: CLI_arg_usage(); exit(1);
+            default: CLI_arg_usage();
         }
     }
     if(restr.possible_packets["ALL"])
+    {
         restr.set_all_possible_packets();
+    }
+    restr.build_filter();
 }
 
 using namespace std;
@@ -408,7 +428,9 @@ int main(int argc, char **argv)
     struct pcap_pkthdr header;	    /* The header that pcap gives us */
     const u_char *packet;		    /* The actual packet */
     
-    get_restrictions(argc, argv);
+    set_restrictions(argc, argv);
+
+    std::cout << restr.filter_exp << std::endl;
     
     restr.device = interface_option(restr.device);
     if (restr.device == NULL) {
